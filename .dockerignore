@@ -1,0 +1,7 @@
+node_modules
+npm-debug.log
+.next/cache
+.next/trace
+.DS_Store
+.vscode
+.env
