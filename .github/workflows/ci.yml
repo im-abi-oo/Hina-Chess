@@ -6,14 +6,49 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write     # اجازه لازم برای push کردن package-lock.json
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true   # اجازه استفاده از GITHUB_TOKEN برای push
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 18
-      - run: npm ci
-      - run: npm run build
-      - run: npm run lint || true
+
+      - name: Install dependencies and create package-lock if missing
+        run: |
+          set -e
+          if [ -f package-lock.json ]; then
+            echo "package-lock.json exists → using npm ci"
+            npm ci
+          else
+            echo "package-lock.json NOT found → running npm install to generate it"
+            npm install
+
+            # اگر فایل package-lock.json تغییر یا ایجاد شده، آن را commit و push کن
+            if git status --porcelain -- package-lock.json | grep -q .; then
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+              git add package-lock.json
+              git commit -m "chore: add package-lock.json [skip ci]" || echo "no commit needed"
+              git push
+            else
+              echo "package-lock.json not changed — nothing to commit."
+            fi
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint (don't fail the job for lint errors)
+        run: npm run lint || true
