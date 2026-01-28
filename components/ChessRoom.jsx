@@ -1,241 +1,314 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { io } from 'socket.io-client'
+import { Chess } from 'chess.js' // استفاده برای محاسبه حرکات مجاز در کلاینت
 
 const Chessboard = dynamic(() => import('react-chessboard').then(m => m.Chessboard), { ssr: false })
 
 let socket = null
 
-export default function ChessRoom({ roomId, setRoomJoined }) {
-  const containerRef = useRef(null)
+export default function ChessRoom({ roomId, onLeave, config }) {
+  const [game, setGame] = useState(new Chess())
   const [role, setRole] = useState('spectator')
-  const [fen, setFen] = useState('start')
-  const [moveHistory, setMoveHistory] = useState([])
-  const [chat, setChat] = useState([])
-  const [msg, setMsg] = useState('')
+  const [status, setStatus] = useState('waiting') // waiting, playing, finished
   const [players, setPlayers] = useState([])
-  const [status, setStatus] = useState('waiting')
-  const [orientation, setOrientation] = useState('white')
-  const [timeLeft, setTimeLeft] = useState({ white: 300, black: 300 })
+  const [timeLeft, setTimeLeft] = useState({ white: 0, black: 0 })
   const [turn, setTurn] = useState('white')
-  const localClientIdRef = useRef(null)
-  const chatBoxRef = useRef(null)
-  const [boardWidth, setBoardWidth] = useState(420)
+  const [myId, setMyId] = useState(null)
+  
+  // UI States
+  const [chat, setChat] = useState([])
+  const [msgInput, setMsgInput] = useState('')
+  const [boardWidth, setBoardWidth] = useState(480)
+  const [lastMoveSquares, setLastMoveSquares] = useState({})
+  const [optionSquares, setOptionSquares] = useState({})
+  const [resultModal, setResultModal] = useState(null)
 
-  useEffect(() => {
-    function measure() {
-      const w = containerRef.current ? containerRef.current.clientWidth : 480
-      const width = Math.min(520, Math.max(300, Math.floor(w * 0.6)))
-      setBoardWidth(width)
+  const containerRef = useRef(null)
+  const chatEndRef = useRef(null)
+  
+  // Sounds
+  const playSound = (type) => {
+    // برای پرهیز از افزودن فایل، از لینک‌های استاندارد استفاده می‌کنیم.
+    // در نسخه پروداکشن باید فایل‌ها را دانلود و در پوشه public قرار دهید.
+    const sounds = {
+      move: 'https://images.chesscomfiles.com/chess-themes/sounds/_common/move-self.mp3',
+      capture: 'https://images.chesscomfiles.com/chess-themes/sounds/_common/capture.mp3',
+      check: 'https://images.chesscomfiles.com/chess-themes/sounds/_common/move-check.mp3',
+      end: 'https://images.chesscomfiles.com/chess-themes/sounds/_common/game-end.mp3'
     }
-    measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
+    try { new Audio(sounds[type]).play().catch(() => {}) } catch(e){}
+  }
+
+  // --- RESIZE LOGIC ---
+  useEffect(() => {
+    const handleResize = () => {
+      if(containerRef.current) {
+        const w = containerRef.current.clientWidth
+        setBoardWidth(Math.min(600, w))
+      }
+    }
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
+  // --- SOCKET & GAME LOGIC ---
   useEffect(() => {
-    if (!roomId) return
-    let clientId = localStorage.getItem('hina_cid')
+    let clientId = localStorage.getItem('hina_cid_v2')
     if (!clientId) {
-      clientId = crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)
-      localStorage.setItem('hina_cid', clientId)
+      clientId = Math.random().toString(36).substring(2) + Date.now().toString(36)
+      localStorage.setItem('hina_cid_v2', clientId)
     }
-    localClientIdRef.current = clientId
+    setMyId(clientId)
 
-    if (!socket) socket = io()
+    socket = io({ transports: ['websocket'] }) // Force websocket for speed
 
-    socket.emit('join', { roomId, clientId }, (res) => {
-      if (!res || !res.ok) {
-        alert('خطا هنگام پیوستن: ' + (res && res.reason ? res.reason : 'unknown'))
-        return
+    socket.emit('join', { roomId, clientId, options: config }, (res) => {
+      if (res.ok) {
+        setRole(res.role)
+        if (res.state) syncState(res.state)
+      } else {
+        alert('خطا در اتصال: ' + res.error)
+        onLeave()
       }
-      const assignedRole = res.role || 'spectator'
-      setRole(assignedRole)
-      setOrientation(assignedRole === 'black' ? 'black' : 'white')
-      if (res.state) applyState(res.state)
     })
 
-    socket.on('state', (s) => { if (s) applyState(s) })
-    socket.on('time', (t) => setTimeLeft(t))
-    socket.on('chat', (m) => {
-      setChat(c => [...c, { from: m.from, text: m.message, ts: m.ts }])
+    socket.on('state', syncState)
+    
+    socket.on('move-sound', ({ capture, check }) => {
+       if(check) playSound('check')
+       else if(capture) playSound('capture')
+       else playSound('move')
     })
-    socket.on('player-left', ({ clientId: leftClientId, players: roomPlayers }) => {
-      setPlayers(roomPlayers || [])
-      setStatus('waiting')
+
+    socket.on('time-sync', (times) => setTimeLeft(times))
+    
+    socket.on('chat', (msg) => {
+      setChat(prev => [...prev, msg])
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
     })
-    socket.on('resign', ({ by, color }) => {
-      setStatus('resigned')
-      alert(`بازیکن ${color} تسلیم شد.`)
+
+    socket.on('game-over', (res) => {
+      playSound('end')
+      setResultModal(res)
     })
-    socket.on('move', (m) => {
-      // moves are applied via state updates; state handler will set fen/history
-    })
+
+    // Local Timer simulation for smoothness
+    const timer = setInterval(() => {
+      if (status === 'playing') {
+        setTimeLeft(prev => {
+          const t = { ...prev }
+          if (t[turn] > 0) t[turn] = Math.max(0, t[turn] - 0.1) // 100ms update
+          return t
+        })
+      }
+    }, 100)
 
     return () => {
-      if (socket) {
-        socket.disconnect()
-        socket = null
-      }
+      socket.disconnect()
+      clearInterval(timer)
     }
   }, [roomId])
 
-  useEffect(() => {
-    // auto-scroll chat to bottom
-    if (!chatBoxRef.current) return
-    chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight
-  }, [chat])
-
-  function applyState(state) {
+  function syncState(state) {
     if (!state) return
-    setFen(state.fen || 'start')
-    setMoveHistory(state.history || [])
-    setPlayers(state.players || [])
-    setStatus(state.status || 'waiting')
-    setTimeLeft(state.timeLeft || { white: 300, black: 300 })
-    setTurn(state.turn || 'white')
-
-    const me = state.players && state.players.find(p => p.clientId === localClientIdRef.current)
-    const roleNow = me ? me.color : 'spectator'
-    setRole(roleNow)
-    setOrientation(roleNow === 'black' ? 'black' : 'white')
+    const newGame = new Chess(state.fen)
+    setGame(newGame)
+    setPlayers(state.players)
+    setStatus(state.status)
+    setTurn(state.turn)
+    // Only update explicit time from server if needed, relying on local timer for smoothness usually
+    setTimeLeft(state.timeLeft) 
+    
+    // Highlight last move
+    if(state.lastMove) {
+        setLastMoveSquares({
+            [state.lastMove.from]: { background: 'rgba(255, 255, 0, 0.4)' },
+            [state.lastMove.to]: { background: 'rgba(255, 255, 0, 0.4)' }
+        })
+    }
+    
+    if(state.result) setResultModal(state.result)
   }
 
-  function onPieceDrop(sourceSquare, targetSquare) {
-    if (role === 'spectator') return false
+  // --- BOARD INTERACTION ---
+  function onPieceDrop(source, target) {
     if (role !== turn) return false
-    const move = { from: sourceSquare, to: targetSquare, promotion: 'q' }
-    socket.emit('move', { roomId, clientId: localClientIdRef.current, move }, (res) => {
-      if (!res || !res.ok) {
-        // optionally show reason
-      } else {
-        // optimistic UI: rely on server state update for canonical position
+    
+    // Optimistic UI Update
+    try {
+        const tempGame = new Chess(game.fen())
+        const move = tempGame.move({ from: source, to: target, promotion: 'q' })
+        if (!move) return false
+        
+        setGame(tempGame) // Show move immediately
+        setOptionSquares({}) // Clear hints
+        
+        socket.emit('move', { roomId, clientId: myId, move: { from: source, to: target, promotion: 'q' } }, (res) => {
+            if(!res.ok) {
+                // Revert if server rejected (syncState will handle it actually)
+                console.log('Move rejected')
+            }
+        })
+        return true
+    } catch(e) { return false }
+  }
+
+  function getMoveOptions(square) {
+    const moves = game.moves({ square, verbose: true })
+    if (moves.length === 0) {
+      setOptionSquares({})
+      return
+    }
+    const newSquares = {}
+    moves.map((move) => {
+      newSquares[move.to] = {
+        background: game.get(move.to) && game.get(move.to).color !== game.turn()
+          ? 'radial-gradient(circle, rgba(255,0,0,.5) 85%, transparent 85%)' // Capture hint
+          : 'radial-gradient(circle, rgba(0,0,0,.3) 25%, transparent 25%)', // Move hint
+        borderRadius: '50%'
       }
     })
-    return true
+    newSquares[square] = { background: 'rgba(255, 255, 0, 0.4)' }
+    setOptionSquares(newSquares)
   }
 
-  function sendChat() {
-    if (!msg) return
-    // optimistic append
-    setChat(c => [...c, { from: 'me', text: msg, ts: Date.now() }])
-    socket.emit('chat', { roomId, clientId: localClientIdRef.current, message: msg })
-    setMsg('')
+  // --- ACTIONS ---
+  const sendChat = () => {
+    if(!msgInput.trim()) return
+    socket.emit('chat', { roomId, clientId: myId, message: msgInput })
+    setMsgInput('')
+  }
+  
+  const resign = () => {
+      if(confirm('آیا مطمئن هستید که می‌خواهید تسلیم شوید؟')) {
+          socket.emit('resign', { roomId, clientId: myId })
+      }
   }
 
-  function resetGame() {
-    if (!confirm('آیا می‌خواهید بازی را بازنشانی کنید؟')) return
-    socket.emit('reset', { roomId, clientId: localClientIdRef.current })
+  const formatTime = (s) => {
+    const min = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${min}:${sec.toString().padStart(2, '0')}`
   }
 
-  function resign() {
-    if (!confirm('می‌خواهید تسلیم شوید؟')) return
-    socket.emit('resign', { roomId, clientId: localClientIdRef.current })
-  }
-
-  function formatTime(s) {
-    const m = Math.floor(s / 60).toString().padStart(2, '0')
-    const sec = (s % 60).toString().padStart(2, '0')
-    return `${m}:${sec}`
+  // --- RENDER HELPERS ---
+  const PlayerInfo = ({ color, align }) => {
+      const p = players.find(x => x.color === color)
+      const isMe = p?.clientId === myId
+      const isTurn = turn === color && status === 'playing'
+      
+      return (
+          <div className={`card flex ${align === 'right' ? 'flex-row-reverse' : ''}`} style={{ padding: 12, justifyContent: 'space-between', border: isTurn ? '1px solid var(--accent)' : '1px solid transparent' }}>
+             <div className="flex">
+                 <div style={{ width: 40, height: 40, borderRadius: 8, background: color === 'white' ? '#e2e8f0' : '#334155', display:'grid', placeItems:'center', fontSize: 20 }}>
+                     {color === 'white' ? '♔' : '♚'}
+                 </div>
+                 <div>
+                     <div style={{fontWeight: 'bold'}}>{isMe ? 'شما' : (p ? 'حریف' : 'منتظر...')}</div>
+                     <div className="text-small" style={{fontSize: 12}}>{p?.connected ? 'آنلاین' : 'آفلاین'}</div>
+                 </div>
+             </div>
+             <div className={`timer-box ${isTurn ? 'active' : ''} ${timeLeft[color] < 30 ? 'low' : ''}`}>
+                 {formatTime(timeLeft[color])}
+             </div>
+          </div>
+      )
   }
 
   return (
-    <div ref={containerRef} style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-      <div style={{ flex: '1 1 520px', minWidth: 320 }}>
-        <div className="card" style={{ padding: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div>
-              <strong>اتاق:</strong> {roomId} &nbsp; <span className="small">نقش: {role}</span>
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button onClick={resetGame}>بازنشانی</button>
-              {role !== 'spectator' && <button onClick={resign}>تسلیم</button>}
-              <button onClick={() => { setRoomJoined(false); if (socket) { socket.disconnect(); socket = null } }}>خروج</button>
-            </div>
+    <div className="container" ref={containerRef}>
+      <div className="header">
+          <div className="brand">
+              <h1>Hina Chess</h1>
+              <span>Room: {roomId}</span>
           </div>
-
-          <div style={{ display: 'flex', gap: 24, marginTop: 12, flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 auto', minWidth: 300 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div className="small">سفید</div>
-                  <div style={{ fontSize: 14 }}>{formatTime(timeLeft.white)}</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div className="small">نوبت</div>
-                  <div style={{ fontWeight: '600' }}>{turn}</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div className="small">سیاه</div>
-                  <div style={{ fontSize: 14 }}>{formatTime(timeLeft.black)}</div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 8, display: 'flex', justifyContent: 'center' }}>
-                <Chessboard
-                  id="hina-board"
-                  position={fen}
-                  onPieceDrop={(s, t) => onPieceDrop(s, t)}
-                  boardOrientation={orientation}
-                  arePiecesDraggable={status === 'playing' && role !== 'spectator'}
-                  customBoardStyle={{ width: boardWidth }}
-                />
-              </div>
-
-              <div style={{ marginTop: 8 }} className="small">تاریخچه حرکت‌ها:</div>
-              <div className="note" style={{ maxHeight: 140, overflow: 'auto', padding: 8 }}>
-                {moveHistory.length === 0 ? <div className="small">هیچ حرکتی ثبت نشده</div> :
-                  moveHistory.map((m, i) => (
-                    <div key={i}>{i + 1}. {m.san}</div>
-                  ))
-                }
-              </div>
-            </div>
-
-            <div style={{ width: 340, minWidth: 280 }}>
-              <div className="card" style={{ padding: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div><strong>بازیکنان</strong></div>
-                  <div className="small">حاضر: {players.length}</div>
-                </div>
-                <div style={{ marginTop: 8 }}>
-                  {players.length === 0 && <div className="small">هنوز بازیکنی حاضر نیست</div>}
-                  {players.map(p => (
-                    <div key={p.clientId} style={{ marginTop: 6 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <div className="small">{p.color}</div>
-                        <div className="small">{p.clientId === localClientIdRef.current ? 'من' : p.clientId.slice(0,8)}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="card" style={{ marginTop: 12, padding: 12 }}>
-                <strong>چت</strong>
-                <div ref={chatBoxRef} className="chat-box" style={{ marginTop: 8 }}>
-                  {chat.map((c, i) => (
-                    <div key={i} style={{ marginBottom: 6 }}>
-                      <b style={{ fontSize: 12 }}>{c.from === localClientIdRef.current ? 'من' : c.from.slice(0,8)}:</b>
-                      <span style={{ fontSize: 13, marginLeft: 6 }}>{c.text}</span>
-                      <div style={{ fontSize: 11, color: '#9aa4b2' }}>{new Date(c.ts).toLocaleTimeString()}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="پیام..." />
-                  <button onClick={sendChat}>ارسال</button>
-                </div>
-              </div>
-
-              <div className="card" style={{ marginTop: 12, padding: 12 }}>
-                <div className="small">وضعیت: {status}</div>
-                <div style={{ marginTop: 8 }} className="small">نکته: بازی اعتبارسنجی‌شده سرور دارد و تایمر سرور-محور است.</div>
-              </div>
-            </div>
+          <div>
+              <button className="danger" onClick={onLeave}>خروج از اتاق</button>
           </div>
-        </div>
       </div>
+
+      <div className="grid-layout">
+          {/* ستون چپ: بورد */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
+             <div className="w-full">
+                 <PlayerInfo color={role === 'white' ? 'black' : 'white'} />
+             </div>
+             
+             <div style={{ borderRadius: 8, overflow: 'hidden', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
+                 <Chessboard 
+                    id="Board"
+                    position={game.fen()}
+                    onPieceDrop={onPieceDrop}
+                    boardOrientation={role === 'spectator' ? 'white' : role}
+                    boardWidth={boardWidth}
+                    onPieceDragBegin={(_, square) => getMoveOptions(square)}
+                    onPieceDragEnd={() => setOptionSquares({})}
+                    customSquareStyles={{...lastMoveSquares, ...optionSquares}}
+                    animationDuration={200}
+                 />
+             </div>
+
+             <div className="w-full">
+                 <PlayerInfo color={role === 'spectator' ? 'white' : role} />
+             </div>
+          </div>
+
+          {/* ستون راست: چت و کنترل */}
+          <div className="flex-col" style={{ height: '100%' }}>
+              <div className="card chat-container">
+                  <div className="chat-messages">
+                      {chat.map(m => (
+                          <div key={m.id} className={`msg ${m.fromId === myId ? 'me' : 'them'}`}>
+                              {!m.system && m.fromId !== myId && <div style={{fontSize: 10, opacity: 0.7, marginBottom: 2}}>{m.senderName}</div>}
+                              {m.text}
+                          </div>
+                      ))}
+                      <div ref={chatEndRef} />
+                  </div>
+                  <div className="flex" style={{ marginTop: 10 }}>
+                      <input 
+                        value={msgInput} 
+                        onChange={e => setMsgInput(e.target.value)} 
+                        onKeyDown={e => e.key === 'Enter' && sendChat()}
+                        placeholder="پیام..." 
+                      />
+                      <button onClick={sendChat}>➤</button>
+                  </div>
+              </div>
+
+              <div className="card">
+                  <h3 style={{marginTop:0}}>وضعیت بازی</h3>
+                  <div className="flex-col">
+                      <div className="flex" style={{justifyContent: 'space-between'}}>
+                          <span className="text-small">وضعیت</span>
+                          <span>{status === 'playing' ? 'در جریان' : (status === 'waiting' ? 'در انتظار بازیکن' : 'پایان یافته')}</span>
+                      </div>
+                      {status === 'playing' && role !== 'spectator' && (
+                          <button className="danger w-full" onClick={resign} style={{marginTop: 8}}>تسلیم</button>
+                      )}
+                  </div>
+              </div>
+          </div>
+      </div>
+
+      {/* مودال پایان بازی */}
+      {resultModal && (
+          <div style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999
+          }}>
+              <div className="card" style={{ width: 300, textAlign: 'center', border: '2px solid var(--accent)' }}>
+                  <h2 style={{ fontSize: '2rem', margin: '0 0 10px 0' }}>
+                      {resultModal.winner === 'draw' ? 'مساوی!' : (resultModal.winner === role ? 'شما بردید! 🎉' : 'شما باختید 😔')}
+                  </h2>
+                  <p className="text-muted">علت: {resultModal.reason}</p>
+                  <button onClick={() => window.location.reload()} className="w-full">بازی جدید</button>
+                  <button onClick={() => setResultModal(null)} className="w-full" style={{background: 'transparent', marginTop: 8}}>بستن</button>
+              </div>
+          </div>
+      )}
     </div>
   )
 }
