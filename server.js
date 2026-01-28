@@ -1,14 +1,11 @@
 /**
  * server.js
  * Entrypoint: Next + Express + Socket.IO
- * Loads the socket handler in lib/socket.js
  */
-
 const express = require('express')
 const next = require('next')
 const http = require('http')
 const { Server } = require('socket.io')
-const helmet = require('helmet')
 const socketHandler = require('./lib/socket')
 
 const dev = process.env.NODE_ENV !== 'production'
@@ -17,29 +14,23 @@ const handle = app.getRequestHandler()
 
 app.prepare().then(() => {
   const server = express()
-  server.use(helmet())
-
-  // static hosting (Next handles public/.next)
   const httpServer = http.createServer(server)
+  
   const io = new Server(httpServer, {
-    cors: {
-      origin: process.env.ALLOWED_ORIGIN || '*',
-      methods: ['GET', 'POST']
-    },
-    pingInterval: 20000,
-    pingTimeout: 60000
+    cors: { origin: '*' },
+    pingInterval: 25000,
+    pingTimeout: 20000
   })
 
-  // mount socket logic
+  // Mount Socket Logic
   socketHandler(io)
 
-  // default next handler
   server.all('*', (req, res) => handle(req, res))
 
-  const port = parseInt(process.env.PORT || '3000', 10)
+  const port = process.env.PORT || 3000
   httpServer.listen(port, () => {
-    console.log(`> Hina Chess ready on http://0.0.0.0:${port} (env=${process.env.NODE_ENV})`)
+    console.log(`> Hina Chess Ready on port ${port}`)
   })
 }).catch(err => {
-  console.error('next prepare failed', err)
+  console.error('Next.js prepare failed', err)
 })
