@@ -40,7 +40,7 @@ jobs:
               git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
               git add package-lock.json
-              git commit -m "Hina withe ass" || echo "no commit needed"
+              git commit -m "Hina White ass" || echo "no commit needed"
               git push
             else
               echo "package-lock.json not changed — nothing to commit."
