@@ -3,14 +3,17 @@ import dynamic from 'next/dynamic'
 import { v4 as uuidv4 } from 'uuid'
 import io from 'socket.io-client'
 
-const ChessRoom = dynamic(() => import('../components/ChessRoom'), { ssr: false })
+// Dynamic import with loading state
+const ChessRoom = dynamic(() => import('../components/ChessRoom'), { 
+    ssr: false,
+    loading: () => <div className="container center">در حال بارگذاری صفحه شطرنج...</div>
+})
 
 export default function Home() {
   const [view, setView] = useState('auth') // auth, lobby, game
   const [user, setUser] = useState(null)
   const [roomId, setRoomId] = useState('')
   const [activeRooms, setActiveRooms] = useState([])
-  const [isBot, setIsBot] = useState(false)
   
   // Auth Form State
   const [authMode, setAuthMode] = useState('login')
@@ -20,7 +23,6 @@ export default function Home() {
   // Socket for Lobby
   const [lobbySocket, setLobbySocket] = useState(null)
 
-  // Check login on load
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(data => {
         if(data.user) {
@@ -30,7 +32,6 @@ export default function Home() {
     })
   }, [])
 
-  // Connect to lobby when logged in
   useEffect(() => {
     if(view === 'lobby') {
         const s = io()
@@ -58,44 +59,43 @@ export default function Home() {
     }
   }
 
-  function createGame(vsBot = false) {
-    if(vsBot) {
-        setRoomId('bot-' + uuidv4().slice(0,4))
-        setIsBot(true)
-        setView('game')
-        return
-    }
+  function createGame() {
     const id = uuidv4().slice(0, 6)
+    // Removed 'type' config as we only have human now
     lobbySocket.emit('create-room', { roomId: id, config: { public: true, time: 10 } })
     setRoomId(id)
-    setIsBot(false)
     setView('game')
   }
 
   function joinGame(id) {
+      if(!id) return
       setRoomId(id)
-      setIsBot(false)
       setView('game')
   }
 
   if (view === 'game') {
-      return <ChessRoom roomId={roomId} user={user} isBot={isBot} onLeave={() => setView('lobby')} />
+      return <ChessRoom roomId={roomId} user={user} onLeave={() => setView('lobby')} />
   }
 
   if (view === 'auth') {
       return (
-          <div className="container center">
-              <div className="card col" style={{width: 350}}>
-                  <h1 style={{textAlign:'center', background:'linear-gradient(to right, #6366f1, #ec4899)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent'}}>Hina Chess</h1>
-                  <form onSubmit={handleAuth} className="col">
+          <div className="container center" style={{background: 'radial-gradient(circle at center, #1e1b4b 0%, #000 100%)'}}>
+              <div className="card col" style={{width: '100%', maxWidth: 350, borderTop: '4px solid var(--primary)'}}>
+                  <h1 style={{textAlign:'center', fontSize: '2.5rem', marginBottom: 10}}>Hina Chess</h1>
+                  <p style={{textAlign:'center', color:'var(--text-muted)', marginTop: -15}}>بازی شطرنج آنلاین سریع</p>
+                  
+                  <form onSubmit={handleAuth} className="col" style={{marginTop: 20}}>
                       <input placeholder="نام کاربری" onChange={e => setFormData({...formData, username: e.target.value})} required />
                       <input type="password" placeholder="رمز عبور" onChange={e => setFormData({...formData, password: e.target.value})} required />
-                      <button className="btn" disabled={loading}>{loading ? '...' : (authMode === 'login' ? 'ورود' : 'ثبت نام')}</button>
+                      <button className="btn" disabled={loading} style={{marginTop: 10}}>
+                          {loading ? '...' : (authMode === 'login' ? 'ورود' : 'ثبت نام')}
+                      </button>
                   </form>
-                  <div style={{textAlign:'center', fontSize:'0.9rem', cursor:'pointer', color:'var(--primary)'}} onClick={() => setAuthMode(authMode==='login'?'register':'login')}>
-                      {authMode === 'login' ? 'حساب ندارید؟ ثبت نام' : 'ورود به حساب'}
+                  <div style={{textAlign:'center', marginTop: 15, cursor:'pointer', color:'var(--primary)'}} onClick={() => setAuthMode(authMode==='login'?'register':'login')}>
+                      {authMode === 'login' ? 'حساب ندارید؟ ثبت نام کنید' : 'حساب دارید؟ وارد شوید'}
                   </div>
               </div>
+              <div className="copyright" style={{position:'absolute', bottom: 10}}>&copy; Built by <b>im_abi</b></div>
           </div>
       )
   }
@@ -103,51 +103,68 @@ export default function Home() {
   // LOBBY VIEW
   return (
     <div className="container">
-        <div className="header flex between" style={{marginBottom: 40}}>
+        {/* Lobby Header */}
+        <div className="flex between" style={{marginBottom: 30, padding: '10px 0'}}>
             <div className="flex">
-                <div style={{width:40, height:40, background:'var(--primary)', borderRadius:'50%', display:'grid', placeItems:'center', fontWeight:'bold', fontSize:20}}>
+                <div className="avatar" style={{background:'var(--primary)', fontSize: 18}}>
                     {user.username[0].toUpperCase()}
                 </div>
                 <div>
-                    <div style={{fontWeight:'bold'}}>{user.username}</div>
-                    <div style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>ELO: {user.elo || 1200}</div>
+                    <div style={{fontWeight:'bold', fontSize: '1.1rem'}}>{user.username}</div>
+                    <div style={{fontSize:'0.8rem', color:'var(--success)'}}>● Online</div>
                 </div>
             </div>
-            <button className="btn-outline" onClick={() => { fetch('/api/auth/logout', {method:'POST'}); setView('auth'); }}>خروج</button>
+            <button className="btn-outline btn-sm" onClick={() => { fetch('/api/auth/logout', {method:'POST'}); setView('auth'); }}>خروج</button>
         </div>
 
-        <div className="game-grid">
+        <div style={{display:'grid', gap: 20, gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))'}}>
+            {/* Create Game Section */}
             <div className="card col">
-                <h2>شروع بازی</h2>
-                <button className="btn" onClick={() => createGame(false)} style={{height: 60, fontSize: '1.2rem'}}>🎮 ساخت اتاق آنلاین</button>
-                <button className="btn btn-outline" onClick={() => createGame(true)}>🤖 بازی با هوش مصنوعی (Stockfish)</button>
+                <h2>شروع بازی جدید</h2>
+                <button className="btn" onClick={createGame} style={{height: 70, fontSize: '1.2rem', display:'flex', alignItems:'center', justifyContent:'center', gap: 10}}>
+                    <span>⚔️</span> ساخت اتاق بازی
+                </button>
                 
-                <div style={{marginTop: 20}}>
-                    <h3>پیوستن با کد</h3>
+                <div style={{marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 20}}>
+                    <label style={{fontSize:'0.9rem', color:'var(--text-muted)', marginBottom: 5, display:'block'}}>ورود با کد اتاق:</label>
                     <div className="flex">
-                        <input placeholder="کد اتاق..." value={roomId} onChange={e=>setRoomId(e.target.value)} />
-                        <button className="btn" onClick={() => joinGame(roomId)}>ورود</button>
+                        <input placeholder="مثلاً: a4f2b1" value={roomId} onChange={e=>setRoomId(e.target.value)} />
+                        <button className="btn btn-outline" onClick={() => joinGame(roomId)}>ورود</button>
                     </div>
                 </div>
             </div>
 
-            <div className="card">
-                <h3>اتاق‌های فعال</h3>
-                {activeRooms.length === 0 ? <p className="text-muted">اتاقی یافت نشد.</p> : (
-                    <div className="col">
-                        {activeRooms.map(r => (
-                            <div key={r.id} className="flex between" style={{padding:10, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-                                <div>
-                                    <b>{r.id}</b>
-                                    <span style={{fontSize:'0.8rem', marginLeft:8, opacity:0.7}}>{r.players}/2 نفر</span>
+            {/* Active Rooms Section */}
+            <div className="card col" style={{minHeight: 300}}>
+                <div className="flex between">
+                    <h3>اتاق‌های فعال</h3>
+                    <button className="btn-icon" style={{width:30, height:30, background:'transparent'}} onClick={()=>lobbySocket.emit('get-rooms')}>🔄</button>
+                </div>
+                
+                <div className="col" style={{overflowY:'auto', maxHeight: 300, paddingRight: 5}}>
+                    {activeRooms.length === 0 ? (
+                        <div className="center" style={{height: 100, color: 'var(--text-muted)', flexDirection:'column'}}>
+                            <span>📭</span>
+                            <p>هیچ اتاقی پیدا نشد</p>
+                        </div>
+                    ) : (
+                        activeRooms.map(r => (
+                            <div key={r.id} className="flex between" style={{padding:12, background:'rgba(255,255,255,0.03)', borderRadius:10, border:'1px solid var(--border)'}}>
+                                <div className="col" style={{gap:2}}>
+                                    <span style={{fontWeight:'bold', fontFamily:'monospace', color:'var(--primary)'}}>#{r.id}</span>
+                                    <span style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>{r.players}/2 بازیکن</span>
                                 </div>
-                                <button className="btn-outline" style={{padding:'4px 10px'}} onClick={() => joinGame(r.id)}>تماشا / بازی</button>
+                                <button className="btn-outline btn-sm" onClick={() => joinGame(r.id)}>
+                                    {r.players < 2 ? 'پیوستن' : 'تماشا'}
+                                </button>
                             </div>
-                        ))}
-                    </div>
-                )}
+                        ))
+                    )}
+                </div>
             </div>
         </div>
+
+        <div className="copyright">&copy; 2026 Hina Chess | Built with ❤️ by <b>im_abi</b></div>
     </div>
   )
 }
