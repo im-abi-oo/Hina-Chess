@@ -1,6 +1,6 @@
 {
   "name": "hina-chess",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "private": true,
   "scripts": {
     "dev": "NODE_ENV=development node server.js",
@@ -26,7 +26,8 @@
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
-    "dotenv": "^16.1.4"
+    "dotenv": "^16.1.4",
+    "next-pwa": "^7.8.0"
   },
   "devDependencies": {
     "eslint": "^8.0.0",
