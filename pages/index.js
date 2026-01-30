@@ -25,7 +25,7 @@ export default function Home() {
           color: 'transparent',
           letterSpacing: '4px'
         }}>
-          HINA CHESS 
+          HINA CHESS
         </h1>
 
         <p style={{ 
@@ -90,7 +90,7 @@ export default function Home() {
       {/* فوتر کپی‌رایت */}
       <footer className={styles.copyright}>
         <p>
-          MADE WITH 💜 BY <span style={{ color: '#f472b6', fontWeight: 'bold' }}>im_abi🌙</span>
+          MADE WITH 💜 BY <span style={{ color: '#f472b6', fontWeight: 'bold' }}>im_abi</span>
         </p>
         <p style={{ fontSize: '0.7rem', marginTop: '5px', opacity: 0.6 }}>
           © {new Date().getFullYear()} HINA CHESS PLATFORM. ALL RIGHTS RESERVED.
