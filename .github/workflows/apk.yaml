@@ -1,11 +1,11 @@
-name: Hina Chess TWA Build
+name: Hina Chess Pro APK Build
 
 on:
   push:
-    branches: [ main ] # نام برنچ اصلی خود را اینجا چک کنید
+    branches: [ main ]
 
 jobs:
-  build:
+  twa-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -25,26 +25,32 @@ jobs:
       - name: Install Bubblewrap
         run: npm install -g @bubblewrap/cli
 
-      - name: Build APK
+      - name: Build Android APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          # ۱. ایجاد کلید امضا (Keystore) به صورت خودکار
+          # ۱. ایجاد کلید امضا
           keytool -genkey -v -keystore android.keystore -alias android -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
             -dname "CN=HinaChess, OU=Saino, O=im_abi, L=Tehran, S=Tehran, C=IR"
 
-          # ۲. کانفیگ اولیه Bubblewrap (بدون پرسش و پاسخ)
-          bubblewrap init --manifest https://hina-chess.onrender.com/manifest.json --meta --directory ./twa-output/
+          # ۲. استخراج SHA-256 برای نمایش در لاگ (جهت قرار دادن در assetlinks.json)
+          echo "--- YOUR SHA-256 FINGERPRINT BELOW ---"
+          keytool -list -v -keystore android.keystore -alias android -storepass "$KEYSTORE_PASSWORD" | grep SHA256
+          echo "--- COPY THE ABOVE CODE TO ASSETLINKS.JSON ---"
+
+          # ۳. کانفیگ و بیلد خودکار
+          mkdir twa-output
+          # استفاده از حالت غیرتعاملی برای پاسخ به سوالات
+          yes | bubblewrap init --manifest https://hina-chess.onrender.com/manifest.json --directory ./twa-output/ --meta
           
-          # ۳. ورود به پوشه و بیلد خروجی
           cd twa-output
           bubblewrap build --signingKeyPath ../android.keystore --signingKeyAlias android \
-            --signingKeyPassword "$KEY_PASSWORD" --signingStorePassword "$KEYSTORE_PASSWORD"
+            --signingKeyPassword "$KEY_PASSWORD" --signingStorePassword "$KEYSTORE_PASSWORD" --skipInstallCheck
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Hina-Chess-Android-APK
+          name: Hina Chess
           path: twa-output/*.apk
