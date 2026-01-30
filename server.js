@@ -5,7 +5,8 @@ const http = require('http')
 const { Server } = require('socket.io')
 const cookieParser = require('cookie-parser')
 const jwt = require('jsonwebtoken')
-const bcrypt = require('bcryptjs') // حتما نصب کنید: npm install bcryptjs
+const bcrypt = require('bcryptjs')
+const os = require('os') // برای بخش وضعیت سرور
 const { connectDB } = require('./lib/db')
 const socketHandler = require('./lib/socket') 
 const { User } = require('./lib/models')
@@ -16,40 +17,54 @@ const handle = app.getRequestHandler()
 const PORT = process.env.PORT || 3000
 
 app.prepare().then(async () => {
-    // ۱. اتصال به دیتابیس
+    // ۱. اتصال به دیتابیس (MongoDB)
     await connectDB()
 
     const server = express()
     const httpServer = http.createServer(server)
     
-    // ۲. راه‌اندازی Socket.io
+    // ۲. پیکربندی Socket.io
     const io = new Server(httpServer, {
         cors: { origin: "*" },
         transports: ['websocket', 'polling']
     })
 
-    // میدل‌ویرها
+    // میدل‌ویرهای اکسپرس
     server.use(express.json())
     server.use(cookieParser())
 
-    // ۳. مسیر ثبت‌نام (Register)
+    // --- مسیر جدید: مانیتورینگ وضعیت (Health Check) ---
+    server.get('/api/status', (req, res) => {
+        const mongoose = require('mongoose');
+        const uptime = process.uptime();
+        
+        res.json({
+            status: 'online',
+            db_connected: mongoose.connection.readyState === 1,
+            server_info: {
+                platform: os.platform(),
+                uptime: `${Math.floor(uptime / 60)} minutes`,
+                memory_usage: `${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`
+            },
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    // ۳. مسیر ثبت‌نام (Register) با هش کردن پسورد و ولیدیشن موبایل
     server.post('/api/auth/register', async (req, res) => {
         try {
             const { username, password, phone } = req.body
             
-            // اعتبارسنجی موبایل
             if (phone) {
                 const phoneRegex = /^09\d{9}$/;
                 if (!phoneRegex.test(phone)) {
-                    return res.status(400).json({ ok: false, error: 'شماره موبایل باید ۱۱ رقم و با 09 شروع شود' })
+                    return res.status(400).json({ ok: false, error: 'شماره موبایل نامعتبر است' })
                 }
             }
 
-            // بررسی یوزر تکراری
             const existingUser = await User.findOne({ username })
-            if (existingUser) return res.status(400).json({ ok: false, error: 'این نام کاربری قبلاً ثبت شده است' })
+            if (existingUser) return res.status(400).json({ ok: false, error: 'این نام کاربری تکراری است' })
             
-            // هش کردن رمز عبور قبل از ذخیره
             const hashedPassword = await bcrypt.hash(password, 12)
             
             const user = await User.create({ 
@@ -58,45 +73,41 @@ app.prepare().then(async () => {
                 phone: phone || '' 
             })
 
-            // ساخت توکن
             const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '7d' })
             
-            // تنظیم کوکی
-            res.cookie('token', token, { httpOnly: true, maxAge: 7*24*3600*1000 })
+            res.cookie('token', token, { httpOnly: true, maxAge: 7*24*3600*1000, sameSite: 'lax' })
             res.json({ ok: true, user: { username: user.username, elo: user.elo } })
         } catch(e) { 
-            console.error("Register Error:", e)
-            res.status(500).json({ ok: false, error: 'خطای سرور در عملیات ثبت‌نام' }) 
+            console.error(e)
+            res.status(500).json({ ok: false, error: 'خطای سرور' }) 
         }
     })
 
-    // ۴. مسیر ورود (Login)
+    // ۴. مسیر ورود (Login) با مقایسه Bcrypt
     server.post('/api/auth/login', async (req, res) => {
         try {
             const { username, password } = req.body
             const user = await User.findOne({ username })
             
-            if(!user) return res.status(401).json({ ok: false, error: 'نام کاربری یا رمز عبور اشتباه است' })
-            
-            // مقایسه پسورد با پسورد هش شده در دیتابیس
-            const isMatch = await bcrypt.compare(password, user.password)
-            if(!isMatch) return res.status(401).json({ ok: false, error: 'نام کاربری یا رمز عبور اشتباه است' })
+            if(!user || !(await bcrypt.compare(password, user.password))) {
+                return res.status(401).json({ ok: false, error: 'نام کاربری یا رمز عبور اشتباه است' })
+            }
             
             const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '7d' })
-            res.cookie('token', token, { httpOnly: true, maxAge: 7*24*3600*1000 })
+            res.cookie('token', token, { httpOnly: true, maxAge: 7*24*3600*1000, sameSite: 'lax' })
             res.json({ ok: true, user: { username: user.username, elo: user.elo } })
         } catch(e) { 
-            res.status(500).json({ ok: false, error: 'خطای سرور در ورود' }) 
+            res.status(500).json({ ok: false, error: 'خطا در ورود' }) 
         }
     })
 
-    // ۵. خروج (Logout)
+    // ۵. خروج و پاک کردن کوکی
     server.post('/api/auth/logout', (req, res) => {
         res.clearCookie('token')
         res.json({ ok: true })
     })
 
-    // ۶. چک کردن وضعیت لاگین کاربر (Me)
+    // ۶. احراز هویت لحظه‌ای برای فرانت‌اِند
     server.get('/api/auth/me', async (req, res) => {
         const token = req.cookies.token
         if(!token) return res.json({ user: null })
@@ -107,10 +118,9 @@ app.prepare().then(async () => {
         } catch(e) { res.json({ user: null }) }
     })
 
-    // ۷. تزریق هویت کاربر به سوکت (Socket Auth Middleware)
+    // ۷. تزریق یوزر به Socket.io (احراز هویت سوکت)
     io.use((socket, next) => {
         const cookie = socket.handshake.headers.cookie
-        // یوزر مهمان پیش‌فرض
         socket.user = { 
             username: 'Guest_' + Math.floor(1000 + Math.random() * 9000), 
             id: 'guest_' + Date.now(), 
@@ -129,14 +139,20 @@ app.prepare().then(async () => {
         next()
     })
 
-    // ۸. هندل کردن لاجیک بازی
+    // ۸. اجرای هندلر بازی (حرکات، اتاق‌ها، چت)
     socketHandler(io)
 
-    // ۹. هندل کردن تمام درخواست‌های صفحات Next.js
+    // ۹. واگذاری باقی مسیرها به Next.js
     server.all('*', (req, res) => handle(req, res))
 
     httpServer.listen(PORT, (err) => {
         if (err) throw err
-        console.log(`> ♟️ HINA CHESS PRO is live on http://localhost:${PORT}`)
+        console.log(`
+        ╔══════════════════════════════════════════════════╗
+        ║  ♟️  HINA CHESS PRO IS RUNNING                    ║
+        ║  🌐 URL: http://localhost:${PORT}                 ║
+        ║  📂 STATUS: http://localhost:${PORT}/api/status   ║
+        ╚══════════════════════════════════════════════════╝
+        `)
     })
 })
