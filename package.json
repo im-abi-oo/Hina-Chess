@@ -1,36 +1,27 @@
 {
-  "name": "hina-chess",
+  "name": "hina-chess-pro",
   "version": "5.0.0",
-  "private": true,
   "scripts": {
-    "dev": "NODE_ENV=development node server.js",
+    "dev": "node server.js",
     "build": "next build",
-    "start": "NODE_ENV=production node server.js",
-    "lint": "eslint . --ext .js,.jsx || true",
-    "format": "prettier --write . || true"
+    "start": "NODE_ENV=production node server.js"
   },
   "dependencies": {
-    "chess.js": "^1.1.0",
+    "bcryptjs": "^2.4.3",
+    "chess.js": "^1.0.0",
+    "cookie-parser": "^1.4.6",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.0.0",
-    "next": "13.4.6",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "react-chessboard": "^1.0.0",
+    "next": "^14.0.0",
+    "next-pwa": "^5.6.0",
+    "react": "^18.2.0",
+    "react-chessboard": "^4.3.0",
+    "react-dom": "^18.2.0",
     "socket.io": "^4.7.2",
     "socket.io-client": "^4.7.2",
-    "uuid": "^9.0.0",
-    "xss": "^1.0.12",
-    "jsonwebtoken": "^9.0.2",
-    "bcryptjs": "^2.4.3",
-    "cookie-parser": "^1.4.6",
-    "cors": "^2.8.5",
-    "dotenv": "^16.1.4",
-    "next-pwa": "^5.6.0"
-  },
-  "devDependencies": {
-    "eslint": "^8.0.0",
-    "prettier": "^2.0.0"
+    "uuid": "^9.0.1",
+    "xss": "^1.0.14"
   }
 }
