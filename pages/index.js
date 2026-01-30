@@ -7,7 +7,7 @@ export default function Home() {
             HINA CHESS
         </h1>
         <p style={{color:'#9ca3af', maxWidth:500, lineHeight:1.6}}>
-            حرفه‌ای‌ترین پلتفرم شطرنج آنلاین. با دوستان خود رقابت کنید، رتینگ بگیرید و لذت ببرید.
+             پلتفرم شطرنج آنلاین. با دوستان خود رقابت کنید، رتینگ بگیرید و لذت ببرید.
         </p>
         
         <div style={{marginTop:40, display:'flex', gap:20}}>
