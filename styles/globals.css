@@ -2,51 +2,93 @@
 
 :root {
   --bg-dark: #0a0a0a;
-  --bg-card: rgba(30, 30, 40, 0.7);
+  --bg-card: rgba(20, 20, 25, 0.85); /* کمی تیره تر برای خوانایی چت */
   --primary: #8b5cf6;
+  --accent: #81b64c; /* رنگ سبز معروف شطرنج */
   --text: #f3f4f6;
   --danger: #ef4444;
+  --warning: #f59e0b;
+  --info: #3b82f6;
 }
 
 * { box-sizing: border-box; }
+
 body {
-  background-color: var(--bg-dark);
-  background-image: radial-gradient(circle at 50% 0%, #2e1065 0%, transparent 60%);
+  background: linear-gradient(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1)), url('/bg.webp');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
   color: var(--text);
   font-family: 'Vazirmatn', sans-serif;
-  margin: 0; min-height: 100vh;
+  margin: 0;
+  min-height: 100vh;
 }
 
-.container { max-width: 1200px; margin: 0 auto; padding: 1rem; }
-.flex-center { display: flex; justify-content: center; align-items: center; }
+.game-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  padding: 20px;
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+@media (min-width: 1024px) {
+  .game-grid {
+    grid-template-columns: 280px 1fr 320px;
+  }
+}
 
 .card {
   background: var(--bg-card);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 16px; padding: 24px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
-.btn {
-  background: var(--primary); color: white; padding: 12px 20px;
-  border-radius: 10px; border: none; font-family: inherit; font-weight: bold;
-  cursor: pointer; width: 100%; transition: 0.2s;
+/* استایل های اختصاصی بورد */
+.board-wrapper {
+  max-width: 650px;
+  width: 100%;
+  justify-self: center;
 }
-.btn:hover { filter: brightness(1.1); }
-.btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.2); }
 
-input, select {
-  background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
-  padding: 12px; border-radius: 8px; color: white; width: 100%; font-family: inherit;
+.timer-box {
+  font-family: 'monospace';
+  font-size: 1.5rem;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 6px;
+  transition: all 0.3s;
 }
-input:focus { border-color: var(--primary); outline: none; }
-.avatar { background: var(--primary); border-radius: 10px; display: grid; place-items: center; font-weight: bold; }
 
-@media (min-width: 768px) {
-    .game-grid { display: grid; grid-template-columns: 250px 1fr 300px; gap: 20px; align-items: start; }
+.timer-active {
+  background: #fff !important;
+  color: #000 !important;
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.3);
 }
-@media (max-width: 767px) {
-    .desktop-only { display: none; }
-    .game-grid { display: flex; flexDirection: column; }
+
+.timer-inactive {
+  background: rgba(0, 0, 0, 0.4);
+  color: #8b8987;
 }
+
+.move-history-table {
+  display: grid;
+  grid-template-columns: 40px 1fr 1fr;
+  gap: 4px;
+  font-size: 0.85rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.move-n { color: #666; padding: 4px; }
+.move-val { background: rgba(255,255,255,0.03); padding: 4px 8px; border-radius: 4px; }
+
+/* اسکرول بار زیبا */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
