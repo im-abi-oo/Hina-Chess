@@ -1,0 +1,27 @@
+:root {
+  --primary: #a78bfa; /* بنفش روشن */
+  --accent: #f472b6;  /* صورتی */
+  --bg: #0d0e14;
+  --text: #ffffff;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Vazirmatn', -apple-system, sans-serif;
+  background-color: var(--bg);
+  color: var(--text);
+  overflow-x: hidden;
+}
+
+/* اسکرول‌بار شیک و باریک */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #1a1c2c;
+}
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 10px;
+}
