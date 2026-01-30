@@ -1,0 +1,54 @@
+.statsCard {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 25px;
+    transition: 0.3s ease;
+}
+
+.statsCard:hover {
+    transform: translateY(-5px);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.roomItem {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: 0.2s;
+}
+
+.roomItem:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--primary);
+}
+
+.badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    background: rgba(139, 92, 246, 0.2);
+    color: #a78bfa;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.logoutBtn {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    padding: 8px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+.logoutBtn:hover {
+    background: #ef4444;
+    color: white;
+}
