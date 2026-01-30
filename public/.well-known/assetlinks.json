@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.hinachess.twa",
+      "sha256_cert_fingerprints": [
+        "F1:E2:D3:C4:B5:A6:97:88:79:60:51:42:33:24:15:06:97:88:79:60:51:42:33:24:15:06:F1:E2:D3:C4:B5:A6"
+      ]
+    }
+  }
+]
