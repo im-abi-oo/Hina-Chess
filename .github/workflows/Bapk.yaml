@@ -1,0 +1,50 @@
+name: Hina Chess TWA Build
+
+on:
+  push:
+    branches: [ main ] # نام برنچ اصلی خود را اینجا چک کنید
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Bubblewrap
+        run: npm install -g @bubblewrap/cli
+
+      - name: Build APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          # ۱. ایجاد کلید امضا (Keystore) به صورت خودکار
+          keytool -genkey -v -keystore android.keystore -alias android -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
+            -dname "CN=HinaChess, OU=Saino, O=im_abi, L=Tehran, S=Tehran, C=IR"
+
+          # ۲. کانفیگ اولیه Bubblewrap (بدون پرسش و پاسخ)
+          bubblewrap init --manifest https://hina-chess.onrender.com/manifest.json --meta --directory ./twa-output/
+          
+          # ۳. ورود به پوشه و بیلد خروجی
+          cd twa-output
+          bubblewrap build --signingKeyPath ../android.keystore --signingKeyAlias android \
+            --signingKeyPassword "$KEY_PASSWORD" --signingStorePassword "$KEYSTORE_PASSWORD"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hina-Chess-Android-APK
+          path: twa-output/*.apk
