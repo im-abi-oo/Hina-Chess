@@ -14,7 +14,18 @@ export default function Auth() {
     setLoading(true);
     setErr('');
     
+    // اعتبارسنجی موبایل قبل از ارسال به سرور (سمت کلاینت)
+    if (mode === 'register' && form.phone) {
+        const phoneRegex = /^09\d{9}$/;
+        if (!phoneRegex.test(form.phone)) {
+            setErr("شماره موبایل نامعتبر است. باید ۱۱ رقم و با 09 شروع شود.");
+            setLoading(false);
+            return;
+        }
+    }
+
     try {
+      // درخواست به api/auth/login یا api/auth/register بر اساس mode
       const res = await fetch(`/api/auth/${mode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -23,12 +34,14 @@ export default function Auth() {
       const data = await res.json();
       
       if (data.ok) {
+        // اگر لاگین یا ثبت نام موفق بود برو به داشبورد
         router.push('/dashboard');
       } else {
+        // نمایش خطای فرستاده شده از سمت سرور
         setErr(data.error || 'خطایی رخ داد. دوباره تلاش کنید.');
       }
     } catch (error) {
-      setErr('اتصال به سرور برقرار نشد.');
+      setErr('اتصال به سرور برقرار نشد. وضعیت اینترنت را چک کنید.');
     } finally {
       setLoading(false);
     }
@@ -37,7 +50,7 @@ export default function Auth() {
   return (
     <div className="container flex-center" style={{ minHeight: '100vh', padding: '20px' }}>
       <div className={styles.authCard}>
-        {/* هدر فرم */}
+        {/* هدر */}
         <div style={{ textAlign: 'center', marginBottom: '30px' }}>
           <div style={{ fontSize: '3rem', marginBottom: '10px' }}>⚡</div>
           <h2 style={{ fontSize: '1.8rem', fontWeight: '800', margin: 0 }}>
@@ -48,15 +61,17 @@ export default function Auth() {
           </p>
         </div>
 
-        {/* سوئیچ بین ورود و ثبت‌نام */}
+        {/* دکمه‌های سوئیچ */}
         <div className={styles.tabContainer}>
           <button 
+            type="button"
             className={`${styles.tabBtn} ${mode === 'login' ? styles.tabBtnActive : ''}`} 
             onClick={() => setMode('login')}
           >
             ورود
           </button>
           <button 
+            type="button"
             className={`${styles.tabBtn} ${mode === 'register' ? styles.tabBtnActive : ''}`} 
             onClick={() => setMode('register')}
           >
@@ -64,12 +79,13 @@ export default function Auth() {
           </button>
         </div>
 
-        {/* فرم */}
+        {/* فرم اصلی */}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
           <input 
             className={styles.inputField}
             placeholder="نام کاربری" 
             required 
+            value={form.username}
             onChange={e => setForm({ ...form, username: e.target.value })} 
           />
           
@@ -77,6 +93,7 @@ export default function Auth() {
             <input 
               className={styles.inputField}
               placeholder="شماره موبایل (اختیاری)" 
+              value={form.phone}
               onChange={e => setForm({ ...form, phone: e.target.value })} 
             />
           )}
@@ -86,6 +103,7 @@ export default function Auth() {
             type="password" 
             placeholder="رمز عبور" 
             required 
+            value={form.password}
             onChange={e => setForm({ ...form, password: e.target.value })} 
           />
           
@@ -110,14 +128,15 @@ export default function Auth() {
               fontSize: '1.1rem', 
               padding: '14px', 
               borderRadius: '12px',
-              marginTop: '10px'
+              marginTop: '10px',
+              cursor: loading ? 'not-allowed' : 'pointer'
             }}
           >
             {loading ? 'در حال پردازش...' : 'تایید و ادامه'}
           </button>
         </form>
         
-        {/* فوتر فرم */}
+        {/* فوتر فوتر */}
         {mode === 'login' && (
           <div style={{ textAlign: 'center', marginTop: '25px' }}>
             <p style={{ fontSize: '0.85rem', color: '#9ca3af' }}>
@@ -127,19 +146,25 @@ export default function Auth() {
               href="mailto:im.abi.cma@gmail.com" 
               style={{ color: 'var(--primary)', fontSize: '0.85rem', textDecoration: 'none', fontWeight: '600' }}
             >
-              ارتباط با پشتیبانی: im.abi.cma@gmail.com
+              پشتیبانی: im.abi.cma@gmail.com
             </a>
           </div>
         )}
       </div>
 
-      {/* استایل کلی برای پس‌زمینه (اگر قبلاً ست نشده) */}
       <style jsx global>{`
         body {
           background: linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.5)), url('/bg.webp');
           background-size: cover;
           background-position: center;
           background-attachment: fixed;
+          margin: 0;
+          font-family: 'Vazirmatn', sans-serif;
+        }
+        .flex-center {
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
       `}</style>
     </div>
