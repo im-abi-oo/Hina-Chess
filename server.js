@@ -6,7 +6,9 @@ const { Server } = require('socket.io')
 const cookieParser = require('cookie-parser')
 const jwt = require('jsonwebtoken')
 const { connectDB } = require('./lib/db')
-const socketHandler = require('./lib/socket')
+// اطمینان حاصل کنید فایل socket.js در پوشه lib موجود است
+const socketHandler = require('./lib/socket') 
+const { User } = require('./lib/models') // اطمینان از وجود مدل
 
 const dev = process.env.NODE_ENV !== 'production'
 const app = next({ dev })
@@ -32,8 +34,6 @@ app.prepare().then(async () => {
     server.use(cookieParser())
 
     // 4. API های احراز هویت (Auth)
-    const { User } = require('./lib/models')
-
     server.post('/api/auth/register', async (req, res) => {
         try {
             const { username, password, email } = req.body
@@ -77,7 +77,8 @@ app.prepare().then(async () => {
     // 5. تزریق هویت کاربر به سوکت
     io.use((socket, next) => {
         const cookie = socket.handshake.headers.cookie
-        socket.user = { username: 'مهمان', id: 'guest_'+Math.floor(Math.random()*1000), isGuest: true }
+        // ایجاد یوزر مهمان تصادفی در صورت نبود کوکی
+        socket.user = { username: 'مهمان_' + Math.floor(Math.random()*1000), id: 'guest_'+Math.floor(Math.random()*1000), isGuest: true }
         
         if (cookie) {
             const token = cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1]
@@ -91,7 +92,7 @@ app.prepare().then(async () => {
         next()
     })
 
-    // 6. هندل کردن لاجیک بازی
+    // 6. هندل کردن لاجیک بازی (فراخوانی تابع اکسپورت شده از lib/socket.js)
     socketHandler(io)
 
     // 7. هندل کردن صفحات Next.js
@@ -99,6 +100,6 @@ app.prepare().then(async () => {
 
     httpServer.listen(PORT, (err) => {
         if (err) throw err
-        console.log(`> 🚀 Hina Chess Pro Ready on http://localhost:${PORT}`)
+        console.log(`> :rocket: Hina Chess Pro Ready on http://localhost:${PORT}`)
     })
 })
