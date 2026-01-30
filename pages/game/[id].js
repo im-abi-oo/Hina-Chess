@@ -4,150 +4,249 @@ import dynamic from 'next/dynamic'
 import { io } from 'socket.io-client'
 import { Chess } from 'chess.js'
 
-const Chessboard = dynamic(() => import('react-chessboard').then(m => m.Chessboard), { ssr: false })
+// لود کردن بورد فقط در سمت کلاینت برای جلوگیری از خطای SSR
+const Chessboard = dynamic(() => import('react-chessboard').then(m => m.Chessboard), { 
+    ssr: false,
+    loading: () => <div className="flex-center" style={{height:400}}>در حال بارگذاری صفحه...</div>
+})
 
 export default function Game() {
-  const router = useRouter()
-  const { id } = router.query
-  const socketRef = useRef(null)
+    const router = useRouter()
+    const { id } = router.query
+    const socketRef = useRef(null)
 
-  const [game, setGame] = useState(new Chess())
-  const [fen, setFen] = useState('start')
-  const [players, setPlayers] = useState([])
-  const [myColor, setMyColor] = useState('spectator')
-  const [timeLeft, setTimeLeft] = useState({w:0, b:0})
-  const [status, setStatus] = useState('loading')
-  const [result, setResult] = useState(null)
-  
-  // Chat
-  const [chat, setChat] = useState([])
-  const [msg, setMsg] = useState('')
+    const [game, setGame] = useState(new Chess())
+    const [fen, setFen] = useState('start')
+    const [players, setPlayers] = useState([])
+    const [myColor, setMyColor] = useState('spectator')
+    const [timeLeft, setTimeLeft] = useState({ w: 0, b: 0 })
+    const [status, setStatus] = useState('loading')
+    const [result, setResult] = useState(null)
 
-  // Theme
-  const [theme, setTheme] = useState({ light: '#e0c0f8', dark: '#7c3aed' })
-  const [showSettings, setShowSettings] = useState(false)
+    // Chat
+    const [chat, setChat] = useState([])
+    const [msg, setMsg] = useState('')
 
-  useEffect(() => {
-    if(!id) return
-    const saved = localStorage.getItem('theme'); if(saved) setTheme(JSON.parse(saved))
+    // UI & Theme
+    const [theme, setTheme] = useState({ light: '#e0c0f8', dark: '#7c3aed' })
+    const [showSettings, setShowSettings] = useState(false)
 
-    const s = io()
-    socketRef.current = s
-    s.emit('join', { roomId: id })
+    useEffect(() => {
+        if (!id) return
 
-    s.on('init-game', d => {
-        const g = new Chess(d.fen)
-        setGame(g); setFen(d.fen); setPlayers(d.players);
-        setMyColor(d.myColor); setStatus(d.status); setTimeLeft(d.timeLeft);
-    })
+        // لود کردن تم ذخیره شده
+        const saved = localStorage.getItem('hina_theme')
+        if (saved) setTheme(JSON.parse(saved))
 
-    s.on('sync', d => {
-        const g = new Chess(d.fen)
-        setGame(g); setFen(d.fen); setTimeLeft(d.timeLeft);
-        if(d.lastMove) playSound(d.lastMove)
-    })
+        const s = io()
+        socketRef.current = s
 
-    s.on('player-update', setPlayers)
-    s.on('chat-msg', m => setChat(prev => [...prev, m]))
-    s.on('game-over', res => { setResult(res); setStatus('finished') })
-    s.on('error', e => { alert(e); router.push('/dashboard') })
+        s.emit('join', { roomId: id })
 
-    return () => s.disconnect()
-  }, [id])
+        s.on('init-game', d => {
+            const g = new Chess(d.fen)
+            setGame(g)
+            setFen(d.fen)
+            setPlayers(d.players)
+            setMyColor(d.myColor)
+            setStatus(d.status)
+            setTimeLeft(d.timeLeft)
+        })
 
-  const onDrop = (source, target) => {
-      if(game.turn() !== myColor || status !== 'playing') return false
-      try {
-          const temp = new Chess(game.fen())
-          const move = temp.move({ from: source, to: target, promotion: 'q' })
-          if(!move) return false
-          setGame(temp); setFen(temp.fen())
-          socketRef.current.emit('move', { roomId: id, move: { from: source, to: target, promotion: 'q' } })
-          return true
-      } catch(e) { return false }
-  }
+        s.on('sync', d => {
+            const g = new Chess(d.fen)
+            setGame(g)
+            setFen(d.fen)
+            setTimeLeft(d.timeLeft)
+            if (d.lastMove) playSound(d.lastMove)
+        })
 
-  const sendChat = (e) => {
-      e.preventDefault(); if(!msg) return;
-      socketRef.current.emit('chat', { roomId: id, text: msg })
-      setMsg('')
-  }
+        s.on('player-update', setPlayers)
+        s.on('chat-msg', m => setChat(prev => [...prev, m]))
+        s.on('game-over', res => {
+            setResult(res)
+            setStatus('finished')
+        })
 
-  const playSound = (move) => {
-      try { new Audio(move.san.includes('+')?'/sounds/check.mp3':'/sounds/move.mp3').play().catch(()=>{}) } catch(e){}
-  }
+        s.on('error', e => {
+            console.error(e)
+            router.push('/dashboard')
+        })
 
-  if(status === 'loading') return <div className="flex-center" style={{height:'100vh'}}>در حال اتصال...</div>
+        return () => s.disconnect()
+    }, [id])
 
-  const opponent = players.find(p => p.color !== myColor)
-  const me = players.find(p => p.color === myColor)
+    const onDrop = (source, target) => {
+        if (game.turn() !== myColor || status !== 'playing') return false
+        try {
+            const temp = new Chess(game.fen())
+            const move = temp.move({ from: source, to: target, promotion: 'q' })
+            if (!move) return false
 
-  return (
-    <div className="container game-grid" style={{paddingTop:20}}>
-        {/* SIDEBAR */}
-        <div className="card desktop-only">
-            <h3>تنظیمات</h3>
-            <button className="btn btn-outline" onClick={()=>setShowSettings(!showSettings)}>🎨 شخصی سازی</button>
-            {showSettings && (
-                <div style={{display:'flex', gap:5, marginTop:10}}>
-                    <div onClick={()=>{setTheme({light:'#e0c0f8',dark:'#7c3aed'});localStorage.setItem('theme',JSON.stringify({light:'#e0c0f8',dark:'#7c3aed'}))}} style={{width:20,height:20,background:'#7c3aed',borderRadius:'50%'}}></div>
-                    <div onClick={()=>{setTheme({light:'#ecfdf5',dark:'#059669'});localStorage.setItem('theme',JSON.stringify({light:'#ecfdf5',dark:'#059669'}))}} style={{width:20,height:20,background:'#059669',borderRadius:'50%'}}></div>
+            setGame(temp)
+            setFen(temp.fen())
+            socketRef.current.emit('move', { 
+                roomId: id, 
+                move: { from: source, to: target, promotion: 'q' } 
+            })
+            return true
+        } catch (e) {
+            return false
+        }
+    }
+
+    const sendChat = (e) => {
+        e.preventDefault()
+        if (!msg.trim()) return
+        socketRef.current.emit('chat', { roomId: id, text: msg })
+        setMsg('')
+    }
+
+    const playSound = (move) => {
+        const audioPath = move.san.includes('+') || move.san.includes('#') ? '/sounds/check.mp3' : '/sounds/move.mp3'
+        try {
+            const audio = new Audio(audioPath)
+            audio.play().catch(() => {})
+        } catch (e) {}
+    }
+
+    const changeTheme = (newTheme) => {
+        setTheme(newTheme)
+        localStorage.setItem('hina_theme', JSON.stringify(newTheme))
+    }
+
+    if (status === 'loading') return <div className="flex-center" style={{ height: '100vh' }}>در حال اتصال به بازی...</div>
+
+    const opponent = players.find(p => p.color !== myColor) || { username: 'در انتظار حریف...' }
+    const me = players.find(p => p.color === myColor) || { username: 'تماشاچی' }
+
+    return (
+        <div className="container game-grid" style={{ paddingTop: 20, paddingBottom: 40 }}>
+            {/* SIDEBAR - SETTINGS */}
+            <div className="card desktop-only">
+                <h3 style={{ marginBottom: 15 }}>تنظیمات بازی</h3>
+                <button className="btn btn-outline" style={{ width: '100%' }} onClick={() => setShowSettings(!showSettings)}>
+                    🎨 شخصی‌سازی بورد
+                </button>
+                {showSettings && (
+                    <div style={{ display: 'flex', gap: 10, marginTop: 15, justifyContent: 'center' }}>
+                        <div onClick={() => changeTheme({ light: '#e0c0f8', dark: '#7c3aed' })} 
+                             style={{ width: 30, height: 30, background: '#7c3aed', borderRadius: '50%', cursor: 'pointer', border: '2px solid white' }}></div>
+                        <div onClick={() => changeTheme({ light: '#ecfdf5', dark: '#059669' })} 
+                             style={{ width: 30, height: 30, background: '#059669', borderRadius: '50%', cursor: 'pointer', border: '2px solid white' }}></div>
+                        <div onClick={() => changeTheme({ light: '#ebecd0', dark: '#779556' })} 
+                             style={{ width: 30, height: 30, background: '#779556', borderRadius: '50%', cursor: 'pointer', border: '2px solid white' }}></div>
+                    </div>
+                )}
+                <button className="btn btn-outline" 
+                        style={{ marginTop: 20, width: '100%', borderColor: 'var(--danger)', color: 'var(--danger)' }} 
+                        onClick={() => router.push('/dashboard')}>
+                    🏃 خروج از اتاق
+                </button>
+            </div>
+
+            {/* MAIN BOARD AREA */}
+            <div style={{ width: '100%', maxWidth: 600, margin: '0 auto' }}>
+                <PlayerBar p={opponent} time={timeLeft[myColor === 'w' ? 'b' : 'w']} />
+                
+                <div style={{ boxShadow: `0 0 40px ${theme.dark}40`, borderRadius: 8, overflow: 'hidden', border: `4px solid ${theme.dark}20` }}>
+                    <Chessboard
+                        position={fen}
+                        onPieceDrop={onDrop}
+                        boardOrientation={myColor === 'black' ? 'black' : 'white'}
+                        customDarkSquareStyle={{ backgroundColor: theme.dark }}
+                        customLightSquareStyle={{ backgroundColor: theme.light }}
+                        animationDuration={300}
+                    />
+                </div>
+
+                <PlayerBar p={me} time={timeLeft[myColor === 'spectator' ? 'w' : myColor]} isMe />
+            </div>
+
+            {/* CHAT SECTION */}
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 400 }}>
+                <h3 style={{ borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>گفتگو</h3>
+                <div style={{ flex: 1, overflowY: 'auto', margin: '10px 0', display: 'flex', flexDirection: 'column', gap: 8, padding: '0 5px' }}>
+                    {chat.length === 0 && <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>هنوز پیامی ارسال نشده است.</p>}
+                    {chat.map((c, i) => (
+                        <div key={i} style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 12px', borderRadius: 10, fontSize: '0.9rem' }}>
+                            <b style={{ color: 'var(--accent)' }}>{c.sender}:</b> {c.text}
+                        </div>
+                    ))}
+                </div>
+                <form onSubmit={sendChat} style={{ display: 'flex', gap: 5, marginTop: 'auto' }}>
+                    <input 
+                        value={msg} 
+                        onChange={e => setMsg(e.target.value)} 
+                        placeholder="چیزی بنویسید..." 
+                        style={{ flex: 1 }}
+                    />
+                    <button className="btn" style={{ width: '50px' }}>{'>'}</button>
+                </form>
+            </div>
+
+            {/* RESULT MODAL */}
+            {result && (
+                <div className="flex-center" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 1000, backdropFilter: 'blur(5px)' }}>
+                    <div className="card animate-in" style={{ textAlign: 'center', padding: 40, border: `2px solid ${result.winner === myColor ? 'var(--success)' : 'var(--danger)'}` }}>
+                        <h1 style={{ fontSize: '2.5rem', marginBottom: 10 }}>
+                            {result.winner === 'draw' ? '🤝 تساوی' : (result.winner === myColor ? '🎉 پیروزی!' : '💀 شکست')}
+                        </h1>
+                        <p style={{ fontSize: '1.2rem', color: 'var(--text-muted)', marginBottom: 30 }}>{result.reason}</p>
+                        <button className="btn" style={{ padding: '12px 40px' }} onClick={() => router.push('/dashboard')}>بازگشت به لابی</button>
+                    </div>
                 </div>
             )}
-            <button className="btn btn-outline" style={{marginTop:10, borderColor:'var(--danger)', color:'var(--danger)'}} onClick={()=>router.push('/dashboard')}>خروج</button>
         </div>
-
-        {/* BOARD */}
-        <div style={{width:'100%', maxWidth:600, margin:'0 auto'}}>
-             <PlayerBar p={opponent} time={timeLeft[myColor==='w'?'b':'w']} />
-             <div style={{boxShadow:`0 0 20px ${theme.dark}80`, borderRadius:4}}>
-                <Chessboard 
-                    position={fen} 
-                    onPieceDrop={onDrop}
-                    boardOrientation={myColor==='w'?'white':'black'}
-                    customDarkSquareStyle={{backgroundColor: theme.dark}}
-                    customLightSquareStyle={{backgroundColor: theme.light}}
-                    animationDuration={200}
-                />
-             </div>
-             <PlayerBar p={me} time={timeLeft[myColor]} isMe />
-        </div>
-
-        {/* CHAT */}
-        <div className="card" style={{display:'flex', flexDirection:'column', height:'80vh', maxHeight:600}}>
-            <h3>گفتگو</h3>
-            <div style={{flex:1, overflowY:'auto', margin:'10px 0', display:'flex', flexDirection:'column', gap:5}}>
-                {chat.map((c,i) => <div key={i} style={{background:'rgba(255,255,255,0.05)', padding:'5px 10px', borderRadius:5}}><b>{c.sender}:</b> {c.text}</div>)}
-            </div>
-            <form onSubmit={sendChat} style={{display:'flex', gap:5}}>
-                <input value={msg} onChange={e=>setMsg(e.target.value)} placeholder="پیام..." />
-                <button className="btn" style={{width:'auto'}}>></button>
-            </form>
-        </div>
-
-        {/* RESULT MODAL */}
-        {result && (
-            <div className="flex-center" style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', zIndex:100}}>
-                <div className="card" style={{textAlign:'center', border:`2px solid ${result.winner===myColor?'#10b981':'#ef4444'}`}}>
-                    <h1>{result.winner === 'draw' ? 'تساوی' : (result.winner === myColor ? 'پیروزی! 🎉' : 'شکست 💔')}</h1>
-                    <p>{result.reason}</p>
-                    <button className="btn" onClick={()=>router.push('/dashboard')}>بازگشت</button>
-                </div>
-            </div>
-        )}
-    </div>
-  )
+    )
 }
 
 function PlayerBar({ p, time, isMe }) {
-    const m = Math.floor(time/60)||0; const s = Math.floor(time%60)||0
+    const m = Math.floor(time / 60) || 0
+    const s = Math.floor(time % 60) || 0
+    const isLowTime = time < 30 && time > 0
+
     return (
-        <div style={{display:'flex', justifyContent:'space-between', padding:10, background: isMe?'rgba(139, 92, 246, 0.2)':'rgba(0,0,0,0.3)', borderRadius:8, margin:'10px 0', border: isMe?'1px solid var(--primary)':'none'}}>
-            <div style={{display:'flex', alignItems:'center', gap:10}}>
-                <div className="avatar" style={{width:30,height:30}}>{p?.username?.[0]||'?'}</div>
-                <span>{p?.username||'در انتظار...'}</span>
+        <div style={{
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            padding: '12px 15px', 
+            background: isMe ? 'rgba(139, 92, 246, 0.15)' : 'rgba(255,255,255,0.05)', 
+            borderRadius: 12, 
+            margin: '12px 0',
+            border: isMe ? '1px solid var(--primary)' : '1px solid transparent',
+            transition: 'all 0.3s'
+        }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div className="avatar" style={{ 
+                    width: 35, 
+                    height: 35, 
+                    background: isMe ? 'var(--primary)' : '#444',
+                    fontSize: '1rem'
+                }}>
+                    {p?.username?.[0]?.toUpperCase() || '?'}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>{p?.username || 'در انتظار...'}</span>
+                    <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>{isMe ? 'شما' : 'حریف'}</span>
+                </div>
             </div>
-            <span style={{fontFamily:'monospace', fontSize:'1.2rem', background:'#111', padding:'2px 6px', borderRadius:4}}>{m}:{s.toString().padStart(2,'0')}</span>
+            
+            <div style={{ 
+                fontFamily: 'monospace', 
+                fontSize: '1.4rem', 
+                fontWeight: 'bold',
+                color: isLowTime ? '#ef4444' : 'white',
+                background: '#000',
+                padding: '4px 12px',
+                borderRadius: 8,
+                minWidth: 80,
+                textAlign: 'center',
+                boxShadow: isLowTime ? '0 0 10px #ef4444' : 'none'
+            }}>
+                {m}:{s.toString().padStart(2, '0')}
+            </div>
         </div>
     )
 }
