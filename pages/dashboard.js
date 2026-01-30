@@ -5,97 +5,77 @@ import { io } from 'socket.io-client'
 export default function Dashboard() {
   const router = useRouter()
   const [user, setUser] = useState(null)
-  const [activeRooms, setActiveRooms] = useState([])
-  
-  // تنظیمات ساخت بازی
-  const [modalOpen, setModalOpen] = useState(false)
-  const [gameConfig, setGameConfig] = useState({ time: 10, color: 'random' })
+  const [rooms, setRooms] = useState([])
+  const [createMode, setCreateMode] = useState(false)
+  const [config, setConfig] = useState({ time: 10, color: 'random' })
 
   useEffect(() => {
-    // چک کردن لاگین
-    fetch('/api/auth/me').then(r => r.json()).then(data => {
-        if(!data.user) router.push('/auth')
-        else setUser(data.user)
+    fetch('/api/auth/me').then(r=>r.json()).then(d => {
+        if(!d.user) router.push('/auth')
+        else setUser(d.user)
     })
     
-    // سوکت لابی
     const socket = io()
-    socket.on('lobby-update', setActiveRooms)
     socket.emit('get-rooms')
+    socket.on('lobby-update', setRooms)
     return () => socket.disconnect()
   }, [])
 
   const createGame = () => {
-      const roomId = Math.random().toString(36).substring(2, 8);
-      // ارسال تنظیمات به سرور (باید سوکت هندلر این را دریافت کند)
+      const id = Math.random().toString(36).substr(2, 6)
       const socket = io()
-      socket.emit('create-room', { roomId, config: gameConfig })
-      
-      // هدایت به صفحه بازی با ID مشخص
-      router.push(`/game/${roomId}`)
+      socket.emit('create-room', { roomId: id, config })
+      router.push(`/game/${id}`)
   }
 
   if(!user) return null
 
   return (
-    <div className="container" style={{paddingTop: 40}}>
-      <header style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:40}}>
-          <div className="flex-center" style={{gap:15}}>
-              <div className="avatar" style={{width:60, height:60, fontSize:'1.5rem'}}>{user.username[0]}</div>
-              <div>
-                  <h2 style={{margin:0}}>{user.username}</h2>
-                  <span style={{color:'var(--primary)'}}>ELO: {user.elo}</span>
-              </div>
-          </div>
-          <button className="btn-outline" onClick={()=>{fetch('/api/auth/logout',{method:'POST'}); router.push('/')}}>خروج</button>
-      </header>
+    <div className="container" style={{paddingTop:30}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:30}}>
+            <div className="flex-center" style={{gap:10}}>
+                <div className="avatar" style={{width:50,height:50,fontSize:'1.5rem'}}>{user.username[0]}</div>
+                <div>
+                    <h3>{user.username}</h3>
+                    <span style={{color:'var(--primary)'}}>ELO: {user.elo}</span>
+                </div>
+            </div>
+            <button className="btn-outline" style={{width:'auto'}} onClick={()=>{fetch('/api/auth/logout',{method:'POST'}); router.push('/')}}>خروج</button>
+        </div>
 
-      <div className="game-grid">
-          {/* بخش بازی جدید */}
-          <div className="card">
-              <h3>🔥 شروع بازی</h3>
-              <button className="btn" onClick={() => setModalOpen(true)} style={{height: 80, fontSize:'1.3rem', marginTop:20}}>
-                  ساخت اتاق جدید
-              </button>
-              
-              {modalOpen && (
-                  <div style={{marginTop: 20, padding: 15, background:'rgba(0,0,0,0.3)', borderRadius:15}}>
-                      <label style={{display:'block', marginBottom:5}}>زمان بازی (دقیقه):</label>
-                      <input type="number" value={gameConfig.time} onChange={e=>setGameConfig({...gameConfig, time:e.target.value})} />
-                      
-                      <label style={{display:'block', margin:'10px 0 5px'}}>رنگ شما:</label>
-                      <select value={gameConfig.color} onChange={e=>setGameConfig({...gameConfig, color:e.target.value})} style={{width:'100%'}}>
-                          <option value="random">تــصادفی 🎲</option>
-                          <option value="white">سفید ⚪</option>
-                          <option value="black">سیاه ⚫</option>
-                      </select>
-                      
-                      <button className="btn" onClick={createGame} style={{marginTop:15}}>ایجاد اتاق</button>
-                      <button className="btn-outline" onClick={()=>setModalOpen(false)} style={{marginTop:10}}>انصراف</button>
-                  </div>
-              )}
-          </div>
+        <div className="game-grid">
+            <div className="card">
+                <h3>🎮 ساخت بازی</h3>
+                <button className="btn" onClick={()=>setCreateMode(!createMode)} style={{marginTop:15, height:60, fontSize:'1.2rem'}}>بازی جدید +</button>
+                
+                {createMode && (
+                    <div style={{marginTop:20, background:'rgba(0,0,0,0.3)', padding:15, borderRadius:10}}>
+                        <label>زمان (دقیقه):</label>
+                        <input type="number" value={config.time} onChange={e=>setConfig({...config, time:e.target.value})} style={{marginBottom:10}} />
+                        <label>رنگ من:</label>
+                        <select value={config.color} onChange={e=>setConfig({...config, color:e.target.value})} style={{width:'100%', padding:10, borderRadius:8, background:'rgba(0,0,0,0.5)', color:'white', border:'1px solid #333'}}>
+                            <option value="random">تصادفی</option>
+                            <option value="white">سفید</option>
+                            <option value="black">سیاه</option>
+                        </select>
+                        <button className="btn" onClick={createGame} style={{marginTop:15}}>شروع</button>
+                    </div>
+                )}
+            </div>
 
-          {/* لیست اتاق‌ها */}
-          <div className="card">
-              <h3>🌍 بازی‌های فعال</h3>
-              <div style={{marginTop:20, display:'flex', flexDirection:'column', gap:10}}>
-                  {activeRooms.length === 0 && <p className="text-muted">اتاقی یافت نشد.</p>}
-                  {activeRooms.map(room => (
-                      <div key={room.id} style={{display:'flex', justifyContent:'space-between', background:'rgba(255,255,255,0.05)', padding:10, borderRadius:10}}>
-                          <span>اتاق {room.id}</span>
-                          <button className="btn-outline" style={{padding:'5px 15px'}} onClick={()=>router.push(`/game/${room.id}`)}>تماشا / بازی</button>
-                      </div>
-                  ))}
-              </div>
-          </div>
-          
-          {/* بخش دوستان (می‌توانید تکمیل کنید) */}
-          <div className="card">
-              <h3>👥 دوستان</h3>
-              <p style={{fontSize:'0.9rem', color:'var(--text-muted)'}}>لیست دوستان شما خالی است.</p>
-          </div>
-      </div>
+            <div className="card">
+                <h3>🌍 اتاق‌های فعال</h3>
+                <div style={{display:'flex', flexDirection:'column', gap:10, marginTop:15}}>
+                    {rooms.length===0 && <p style={{color:'#6b7280'}}>هیچ بازی فعالی وجود ندارد.</p>}
+                    {rooms.map(r => (
+                        <div key={r.id} style={{display:'flex', justifyContent:'space-between', padding:10, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
+                            <span>اتاق {r.id} ({r.config.time} min)</span>
+                            <button className="btn-outline" style={{width:'auto', padding:'5px 10px'}} onClick={()=>router.push(`/game/${r.id}`)}>پیوستن</button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
     </div>
   )
 }
