@@ -149,7 +149,7 @@ app.prepare().then(async () => {
         if (err) throw err
         console.log(`
         ╔══════════════════════════════════════════════════╗
-        ║  ♟️  HINA CHESS PRO IS RUNNING                    ║
+        ║  ♟️ HINA CHESS IS RUNNING                         ║
         ║  🌐 URL: http://localhost:${PORT}                 ║
         ║  📂 STATUS: http://localhost:${PORT}/api/status   ║
         ╚══════════════════════════════════════════════════╝
