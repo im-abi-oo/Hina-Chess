@@ -1,231 +1,196 @@
-import { useEffect, useState, useRef } from 'react'
-import { useRouter } from 'next/router'
-import dynamic from 'next/dynamic'
-import { io } from 'socket.io-client'
-import { Chess } from 'chess.js'
+import React, { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/router';
+import { io } from 'socket.io-client';
+import { Chess } from 'chess.js';
+import dynamic from 'next/dynamic';
+import styles from '../../styles/Game.module.css';
 
 const Chessboard = dynamic(() => import('react-chessboard').then(m => m.Chessboard), { 
     ssr: false,
-    loading: () => <div className="flex-center" style={{height:400}}>در حال بارگذاری صفحه شطرنج...</div>
-})
+    loading: () => <div className={styles.card}>در حال بارگذاری صفحه شطرنج...</div>
+});
 
-export default function Game() {
-    const router = useRouter()
-    const { id } = router.query
-    const socketRef = useRef(null)
-
-    // Game States
-    const [game, setGame] = useState(new Chess())
-    const [fen, setFen] = useState('start')
-    const [players, setPlayers] = useState([])
-    const [myColor, setMyColor] = useState('spectator')
-    const [timeLeft, setTimeLeft] = useState({ w: 600, b: 600 })
-    const [status, setStatus] = useState('loading')
-    const [result, setResult] = useState(null)
-    const [turn, setTurn] = useState('w')
+export default function GameRoom() {
+    const router = useRouter();
+    const { id: roomId } = router.query;
     
-    // UI States
-    const [moveHistory, setMoveHistory] = useState([])
-    const [lastMoveSquares, setLastMoveSquares] = useState({}) // برای هایلایت مشابه chess.com
-    const [chat, setChat] = useState([])
-    const [msg, setMsg] = useState('')
-
-    // Themes
-    const THEMES = {
-        purple: { light: '#e0c0f8', dark: '#7c3aed', name: 'purple' },
-        green: { light: '#eeeed2', dark: '#769656', name: 'green' }, // Chess.com Classic
-        blue: { light: '#dee3e6', dark: '#8ca2ad', name: 'blue' }
-    }
-    const [theme, setTheme] = useState(THEMES.purple)
-
-    // Timer Logic
-    useEffect(() => {
-        let timer
-        if (status === 'playing') {
-            timer = setInterval(() => {
-                setTimeLeft(prev => ({
-                    ...prev,
-                    [turn]: Math.max(0, prev[turn] - 1)
-                }))
-            }, 1000)
-        }
-        return () => clearInterval(timer)
-    }, [status, turn])
+    const [game, setGame] = useState(new Chess());
+    const [gameState, setGameState] = useState({
+        players: [],
+        myColor: 'spectator',
+        status: 'loading',
+        timeLeft: { w: 600, b: 600 },
+        history: [],
+        config: {}
+    });
+    const [chat, setChat] = useState([]);
+    const [msg, setMsg] = useState('');
+    const socketRef = useRef();
+    const chatEndRef = useRef();
 
     useEffect(() => {
-        if (!id) return
-        
-        const s = io() // آدرس سرور خود را اینجا تنظیم کنید
-        socketRef.current = s
+        if (!roomId) return;
+        socketRef.current = io();
+        socketRef.current.emit('join', { roomId });
 
-        s.emit('join', { roomId: id })
+        socketRef.current.on('init-game', (data) => {
+            setGameState(data);
+            setGame(new Chess(data.fen));
+            if (data.chatHistory) setChat(data.chatHistory);
+        });
 
-        s.on('init-game', d => {
-            const g = new Chess(d.fen)
-            setGame(g)
-            setFen(d.fen)
-            setPlayers(d.players)
-            setMyColor(d.myColor)
-            setStatus(d.status)
-            setTimeLeft(d.timeLeft)
-            setTurn(g.turn())
-            setMoveHistory(g.history())
-        })
+        socketRef.current.on('sync', (data) => {
+            setGame(new Chess(data.fen));
+            setGameState(prev => ({ ...prev, timeLeft: data.timeLeft, history: data.history }));
+        });
 
-        s.on('sync', d => {
-            const g = new Chess(d.fen)
-            setGame(g)
-            setFen(d.fen)
-            setTimeLeft(d.timeLeft)
-            setTurn(d.turn)
-            setMoveHistory(g.history())
-            
-            if (d.lastMove) {
-                // هایلایت آخرین حرکت مشابه Chess.com
-                setLastMoveSquares({
-                    [d.lastMove.from]: { backgroundColor: 'rgba(255, 255, 0, 0.4)' },
-                    [d.lastMove.to]: { backgroundColor: 'rgba(255, 255, 0, 0.4)' }
-                })
-                playSound(d.lastMove)
+        socketRef.current.on('chat-msg', (m) => setChat(prev => [...prev, m]));
+
+        socketRef.current.on('draw-offered', ({ from }) => {
+            if (confirm(`${from} پیشنهاد تساوی داد. می‌پذیرید؟`)) {
+                socketRef.current.emit('offer-draw', { roomId });
             }
-        })
+        });
 
-        s.on('game-over', res => {
-            setResult(res)
-            setStatus('finished')
-            playSound({ san: '#' })
-        })
+        return () => socketRef.current.disconnect();
+    }, [roomId]);
 
-        return () => s.disconnect()
-    }, [id])
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [chat]);
 
     const onDrop = (source, target) => {
-        if (myColor === 'spectator' || game.turn() !== myColor || status !== 'playing') return false
-        
+        if (gameState.status !== 'playing' || game.turn() !== gameState.myColor) return false;
         try {
-            const move = game.move({ from: source, to: target, promotion: 'q' })
-            if (!move) return false
+            const move = { from: source, to: target, promotion: 'q' };
+            const result = game.move(move);
+            if (result) {
+                socketRef.current.emit('move', { roomId, move });
+                return true;
+            }
+        } catch (e) { return false; }
+    };
 
-            setFen(game.fen())
-            setTurn(game.turn())
-            setMoveHistory(game.history())
-            setLastMoveSquares({
-                [source]: { backgroundColor: 'rgba(255, 255, 0, 0.4)' },
-                [target]: { backgroundColor: 'rgba(255, 255, 0, 0.4)' }
-            })
+    const sendQuickChat = (text) => {
+        socketRef.current.emit('chat', { roomId, text });
+    };
 
-            socketRef.current.emit('move', { 
-                roomId: id, 
-                move: { from: source, to: target, promotion: 'q' } 
-            })
-            return true
-        } catch (e) { return false }
-    }
-
-    const playSound = (move) => {
-        let audioPath = '/sounds/move.mp3'
-        if (move.san.includes('#')) audioPath = '/sounds/game-end.mp3'
-        else if (move.san.includes('+')) audioPath = '/sounds/check.mp3'
-        else if (move.flags && move.flags.includes('c')) audioPath = '/sounds/capture.mp3'
-        
-        const audio = new Audio(audioPath)
-        audio.play().catch(() => {})
-    }
-
-    if (status === 'loading') return <div className="loading-screen">در حال اتصال...</div>
-
-    const opponent = players.find(p => p.color !== myColor) || { username: 'Waiting...' }
-    const me = players.find(p => p.color === myColor) || { username: 'You' }
+    if (gameState.status === 'loading') return <div className={styles.card}>اتصال به سرور...</div>;
 
     return (
-        <div className="game-container">
-            <style jsx>{`
-                .game-container { display: grid; grid-template-columns: 1fr 400px; gap: 20px; padding: 20px; max-width: 1200px; margin: auto; }
-                .board-section { position: relative; }
-                .sidebar-section { display: flex; flex-direction: column; gap: 20px; }
-                .move-list { height: 200px; overflow-y: auto; background: #262421; padding: 10px; border-radius: 4px; display: grid; grid-template-columns: 40px 1fr 1fr; font-size: 0.9rem; }
-                .move-num { color: #8b8987; }
-                .move-item { color: #bababa; cursor: pointer; }
-                .move-item:hover { background: #333; }
-                @media (max-width: 1000px) { .game-container { grid-template-columns: 1fr; } }
-            `}</style>
-
-            {/* بخش بورد */}
-            <div className="board-section">
-                <PlayerBar p={opponent} time={timeLeft[myColor === 'w' ? 'b' : 'w']} isActive={turn !== myColor} />
+        <div className={styles['game-grid']}>
+            {/* بخش تنظیمات و کنترل‌های بازی */}
+            <div className={styles.card}>
+                <h3 style={{marginTop: 0}}>♟️ اتاق: {roomId}</h3>
+                <div className={styles['sidebar-tabs']}>
+                    <div className={styles['msg-bubble']}>زمان: {gameState.config.time} دقیقه</div>
+                    <div className={styles['msg-bubble']}>پاداش: {gameState.config.increment} ثانیه</div>
+                </div>
                 
-                <Chessboard
-                    position={fen}
-                    onPieceDrop={onDrop}
-                    boardOrientation={myColor === 'b' ? 'black' : 'white'}
-                    customDarkSquareStyle={{ backgroundColor: theme.dark }}
-                    customLightSquareStyle={{ backgroundColor: theme.light }}
-                    customSquareStyles={lastMoveSquares}
-                    animationDuration={200}
-                />
-
-                <PlayerBar p={me} time={timeLeft[myColor === 'spectator' ? 'w' : myColor]} isMe isActive={turn === myColor} />
+                <div className={styles['emoji-bar']}>
+                    {['👏', '🤔', '🔥', '😂', '🤝', '🏳️'].map(e => (
+                        <button key={e} className={styles['emoji-btn']} onClick={() => {
+                            if (e === '🤝') socketRef.current.emit('offer-draw', { roomId });
+                            else if (e === '🏳️') socketRef.current.emit('resign', { roomId });
+                            else sendQuickChat(e);
+                        }}>{e}</button>
+                    ))}
+                </div>
+                
+                <div className={styles['move-history-table']} style={{marginTop: '20px'}}>
+                    {gameState.history.map((m, i) => (
+                        <div key={i} className={styles['move-val']}>{i % 2 === 0 ? `${Math.floor(i/2)+1}.` : ''} {m}</div>
+                    ))}
+                </div>
             </div>
 
-            {/* بخش سایدبار (ترکیب چت و لیست حرکات مشابه Chess.com) */}
-            <div className="sidebar-section">
-                <div className="card" style={{flex: 1}}>
-                    <h3>📜 تاریخچه حرکات</h3>
-                    <div className="move-list">
-                        {Array.from({ length: Math.ceil(moveHistory.length / 2) }).map((_, i) => (
-                            <>
-                                <div className="move-num">{i + 1}.</div>
-                                <div className="move-item">{moveHistory[i * 2]}</div>
-                                <div className="move-item">{moveHistory[i * 2 + 1] || ''}</div>
-                            </>
-                        ))}
+            {/* بخش بورد شطرنج و لابی */}
+            <div className={styles['board-wrapper']}>
+                {gameState.status === 'waiting' ? (
+                    <div className={styles.card} style={{ textAlign: 'center', padding: '50px' }}>
+                        <h1 style={{color: 'var(--primary)'}}>🎮 لابی انتظار</h1>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '30px', margin: '40px 0' }}>
+                            {gameState.players.map(p => (
+                                <div key={p.id} className={styles.card} style={{ border: p.ready ? '2px solid var(--accent)' : '2px solid var(--danger)', minWidth: '120px' }}>
+                                    <div style={{fontSize: '2rem', marginBottom: '10px'}}>{p.color === 'w' ? '⚪' : '⚫'}</div>
+                                    <b style={{fontSize: '1.1rem'}}>{p.username}</b>
+                                    <div style={{marginTop: '10px', fontSize: '0.8rem'}}>{p.ready ? '✅ آماده' : '⏳ منتظر...'}</div>
+                                </div>
+                            ))}
+                        </div>
+                        {gameState.players.find(p => p.id === socketRef.current?.id)?.ready ? (
+                            <p className={styles['msg-bubble']}>در انتظار تایید حریف...</p>
+                        ) : (
+                            <button className={styles['emoji-btn']} 
+                                    style={{ background: 'var(--accent)', color: '#000', padding: '15px 50px', fontSize: '1.3rem', fontWeight: 'bold' }}
+                                    onClick={() => socketRef.current.emit('player-ready', { roomId })}>
+                                من آماده‌ام!
+                            </button>
+                        )}
                     </div>
-                    
-                    <h3 style={{marginTop: 20}}>💬 چت</h3>
-                    {/* ... کامپوننت چت شما ... */}
-                </div>
-                
-                <div className="card">
-                    <button className="btn btn-outline" style={{width:'100%'}} onClick={() => setTheme(THEMES.green)}>
-                        تغییر تم به Chess.com
-                    </button>
-                </div>
+                ) : (
+                    <>
+                        <PlayerStats 
+                            user={gameState.players.find(p => p.color !== gameState.myColor)} 
+                            time={gameState.timeLeft[gameState.myColor === 'w' ? 'b' : 'w']} 
+                            isActive={game.turn() !== gameState.myColor} 
+                        />
+                        <div style={{ borderRadius: '12px', overflow: 'hidden', boxShadow: '0 25px 60px rgba(0,0,0,0.6)' }}>
+                            <Chessboard 
+                                position={game.fen()} 
+                                onPieceDrop={onDrop} 
+                                boardOrientation={gameState.myColor === 'b' ? 'black' : 'white'}
+                                customDarkSquareStyle={{ backgroundColor: '#779556' }}
+                                customLightSquareStyle={{ backgroundColor: '#ebecd0' }}
+                            />
+                        </div>
+                        <PlayerStats 
+                            user={gameState.players.find(p => p.id === socketRef.current?.id)} 
+                            time={gameState.timeLeft[gameState.myColor]} 
+                            isActive={game.turn() === gameState.myColor}
+                            isMe 
+                        />
+                    </>
+                )}
             </div>
 
-            {/* Modal Result */}
-            {result && <ResultModal result={result} myColor={myColor} />}
+            {/* بخش چت (سایدبار راست در دسکتاپ) */}
+            <div className={styles.card}>
+                <div className={styles['chat-container']}>
+                    <div className={styles['messages-list']}>
+                        {chat.map((c, i) => (
+                            <div key={i} className={styles['msg-bubble']} style={{alignSelf: c.sender === user.username ? 'flex-end' : 'flex-start'}}>
+                                <small style={{display: 'block', color: 'var(--primary)', fontSize: '0.7rem'}}>{c.sender}</small>
+                                {c.text}
+                            </div>
+                        ))}
+                        <div ref={chatEndRef} />
+                    </div>
+                    <form className={styles['input-group']} onSubmit={(e) => {
+                        e.preventDefault();
+                        if (msg.trim()) { socketRef.current.emit('chat', { roomId, text: msg }); setMsg(''); }
+                    }}>
+                        <input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="پیام بده..." />
+                        <button type="submit" style={{display: 'none'}}></button>
+                    </form>
+                </div>
+            </div>
         </div>
-    )
+    );
 }
 
-function PlayerBar({ p, time, isMe, isActive }) {
-    const m = Math.floor(time / 60)
-    const s = time % 60
+function PlayerStats({ user, time, isActive, isMe }) {
+    const m = Math.floor(time / 60);
+    const s = time % 60;
     return (
-        <div className={`player-bar ${isActive ? 'active' : ''}`} style={{
-            display: 'flex', justifyContent: 'space-between', padding: '8px 12px',
-            background: isActive ? '#312e2b' : 'transparent', borderRadius: '4px', margin: '5px 0'
-        }}>
-            <span style={{fontWeight: 'bold'}}>{p.username} {isMe && '(You)'}</span>
-            <span style={{
-                fontFamily: 'monospace', fontSize: '1.2rem', padding: '2px 8px',
-                background: isActive ? '#fff' : '#444', color: isActive ? '#000' : '#fff',
-                borderRadius: '3px'
-            }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', alignItems: 'center' }}>
+            <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                <div style={{width: 35, height: 35, borderRadius: '50%', background: isActive ? 'var(--accent)' : '#444', border: isMe ? '2px solid #fff' : 'none'}}></div>
+                <span style={{ fontWeight: 600, fontSize: '1.1rem' }}>{user?.username || 'تماشاچی'} {isMe && ' (شما)'}</span>
+            </div>
+            <div className={`${styles['timer-box']} ${isActive ? styles['timer-active'] : styles['timer-inactive']}`}>
                 {m}:{s.toString().padStart(2, '0')}
-            </span>
-        </div>
-    )
-}
-
-function ResultModal({ result, myColor }) {
-    return (
-        <div className="modal-overlay" style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', justifyContent:'center', alignItems:'center', zIndex:100}}>
-            <div className="card" style={{textAlign:'center', minWidth: 300}}>
-                <h2>{result.winner === 'draw' ? 'Draw!' : (result.winner === myColor ? 'You Won! 🏆' : 'You Lost!')}</h2>
-                <p>{result.reason}</p>
-                <button className="btn" onClick={() => window.location.href='/dashboard'}>OK</button>
             </div>
         </div>
-    )
+    );
 }
